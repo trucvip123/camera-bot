@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import wave
+from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 import numpy as np
@@ -44,7 +45,7 @@ DEFAULT_QA_TEXT = """\
 # Dòng bắt đầu bằng # là ghi chú, sẽ được bỏ qua
 # ═════════════════════════════════════════════════════════════════════
 
-xin chào|chào|cô ơi|có ở nhà không|alo|bán đồ|có ai ở nhà không|liêm ơi| : Xin chào quý khách! Chào mừng đến với cửa hàng. Tôi có thể giúp gì cho bạn?
+xin chào|chào|cô ơi|có ở nhà không|alo|bán đồ|có ai ở nhà không|liêm ơi|bé ư|bé ơi|ơi|bán đồ i|bán đồ đi|bán i|bán đi|bán đi chị ơi|bán đi chị ư| : Xin chào quý khách! Xin chờ bà chủ tôi một chút ạ.
 tạm biệt|bye|goodbye|hẹn gặp : Cảm ơn quý khách đã ghé thăm! Hẹn gặp lại bạn lần sau. Chúc bạn một ngày vui vẻ!
 cảm ơn|cám ơn|thanks|thành ơn : Không có gì ạ! Rất vui được phục vụ quý khách.
 gíá|bao nhiêu|tiền|chi phí : Để biết giá sản phẩm cụ thể, nhân viên sẽ tư vấn cho bạn ngay ạ.
@@ -154,6 +155,10 @@ class StoreBot:
         self.running    = False
         self._speaking  = threading.Event()   # set khi bot đang phát âm → ngăn echo
         self._proc: Optional[subprocess.Popen] = None
+        self._max_retries = 10
+        self._retry_delay = 2  # seconds, will exponentially backoff
+        self._daily_reconnect_thread = None
+        self._daily_reconnect_hour = 7
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -161,6 +166,11 @@ class StoreBot:
         if self.running:
             return
         self.running = True
+        self._daily_reconnect_thread = threading.Thread(
+            target=self._daily_reconnect_worker,
+            daemon=True,
+        )
+        self._daily_reconnect_thread.start()
         threading.Thread(target=self._run, daemon=True).start()
 
     def stop(self):
@@ -193,6 +203,43 @@ class StoreBot:
             self.on_status("disconnected")
             return
 
+        retry_count = 0
+        retry_delay = self._retry_delay
+
+        while self.running:
+            try:
+                self._attempt_connection(ffmpeg)
+                # If connection succeeds, reset retry counter
+                retry_count = 0
+                retry_delay = self._retry_delay
+            except Exception as e:
+                if not self.running:
+                    break
+
+                retry_count += 1
+                if retry_count > self._max_retries:
+                    self.on_log(f"❌ Không thể kết nối sau {self._max_retries} lần thử. Dừng bot.")
+                    self.running = False
+                    break
+
+                self.on_log(f"⚠ Lỗi kết nối (lần {retry_count}/{self._max_retries}): {e}")
+                self.on_log(f"🔄 Sẽ thử kết nối lại trong {retry_delay} giây...")
+                self.on_status("reconnecting")
+
+                # Wait before retry with exponential backoff
+                for _ in range(int(retry_delay)):
+                    if not self.running:
+                        return
+                    time.sleep(1)
+
+                # Exponential backoff: cap at 30 seconds
+                retry_delay = min(retry_delay * 1.5, 30)
+
+        self.on_status("disconnected")
+        self.on_log("Bot đã dừng.")
+
+    def _attempt_connection(self, ffmpeg: str):
+        """Attempt one connection to RTSP stream."""
         cmd = [
             ffmpeg, "-loglevel", "error",
             "-rtsp_transport", "tcp",
@@ -219,22 +266,47 @@ class StoreBot:
             self.on_log("✅ Bot kết nối camera thành công. Đang lắng nghe...")
             self.on_status("listening")
             self._vad_loop()
-            # Thu thập stderr của FFmpeg để hiển thị lỗi nếu có
-            if self._proc.stderr:
-                err = self._proc.stderr.read(4096).decode(errors="replace").strip()
-                if err:
-                    self.on_log(f"⚠ FFmpeg: {err}")
+            # Stream ended unexpectedly, will trigger reconnection
+            raise RuntimeError("RTSP stream closed unexpectedly")
         except Exception as e:
-            self.on_log(f"❌ Lỗi kết nối camera: {e}")
-        finally:
-            self.running = False
-            self.on_status("disconnected")
+            # Collect FFmpeg stderr if available
+            if self._proc and self._proc.stderr:
+                try:
+                    err = self._proc.stderr.read(4096).decode(errors="replace").strip()
+                    if err and "Error number" in err:
+                        self.on_log(f"⚠ FFmpeg: {err}")
+                except Exception:
+                    pass
+            raise
+
+    def _daily_reconnect_worker(self):
+        """Force reconnect at configured hour every day."""
+        while self.running:
+            now = datetime.now()
+            next_run = now.replace(
+                hour=self._daily_reconnect_hour,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            if now >= next_run:
+                next_run += timedelta(days=1)
+
+            wait_seconds = int((next_run - now).total_seconds())
+            for _ in range(wait_seconds):
+                if not self.running:
+                    return
+                time.sleep(1)
+
+            if not self.running:
+                return
+
+            self.on_log("⏰ 07:00 - Tự động ngắt để kết nối lại RTSP...")
             if self._proc:
                 try:
                     self._proc.terminate()
                 except Exception:
                     pass
-            self.on_log("Bot đã dừng.")
 
     # ── Voice Activity Detection ──────────────────────────────────────────────
 

@@ -34,11 +34,11 @@ class CameraBotApp:
         sf.pack(fill="x", **PAD)
 
         labels = ["IP Camera:", "HTTP Port:", "RTSP Port:", "Username:", "Password:", "RTSP Path:"]
-        self.ip_var        = tk.StringVar(value="192.168.110.235")
+        self.ip_var        = tk.StringVar(value="117.3.249.38")
         self.http_port_var = tk.StringVar(value="80")
-        self.rtsp_port_var = tk.StringVar(value="554")
+        self.rtsp_port_var = tk.StringVar(value="10554")
         self.user_var      = tk.StringVar(value="admin")
-        self.pass_var      = tk.StringVar(value="PVWLBZ")
+        self.pass_var      = tk.StringVar(value="XZFFYO")
         self.rtsp_path_var = tk.StringVar(value="/Streaming/Channels/101")
 
         row_cfg = [
