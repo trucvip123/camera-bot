@@ -49,11 +49,9 @@ xin chào|chào|cô ơi|có ở nhà không|alo|bán đồ|có ai ở nhà khôn
 tạm biệt|bye|goodbye|hẹn gặp : Cảm ơn quý khách đã ghé thăm! Hẹn gặp lại bạn lần sau. Chúc bạn một ngày vui vẻ!
 cảm ơn|cám ơn|thanks|thành ơn : Không có gì ạ! Rất vui được phục vụ quý khách.
 gíá|bao nhiêu|tiền|chi phí : Để biết giá sản phẩm cụ thể, nhân viên sẽ tư vấn cho bạn ngay ạ.
-giờ mở cửa|mấy giờ|giờ làm việc|bao giờ mở : Cửa hàng mở từ 8 giờ sáng đến 10 giờ tối, từ Thứ Hai đến Chủ Nhật.
 sản phẩm|mặt hàng|bán gì|có gì|hàng gì : Cửa hàng có nhiều sản phẩm đa dạng. Bạn đang tìm kiếm loại hàng gì?
 nhân viên|hỗ trợ|gặp người : Tôi sẽ gọi nhân viên đến hỗ trợ bạn ngay ạ!
 wifi|mạng|password wifi|mật khẩu wifi : Mật khẩu Wifi của Thanh Liêm là thanhliem45.
-thanh toán|trả tiền|quẹt thẻ|chuyển khoản : Cửa hàng chấp nhận tiền mặt, thẻ ngân hàng và chuyển khoản.
 gọi nhân viên|cần giúp|ại : Không sao ạ! Tôi sẽ gọi nhân viên đến ngay."""
 
 # ─────────────────────── Rule-based responder ───────────────────────────────
@@ -266,8 +264,8 @@ class StoreBot:
             self.on_log("✅ Bot kết nối camera thành công. Đang lắng nghe...")
             self.on_status("listening")
             self._vad_loop()
-            # Stream ended unexpectedly, will trigger reconnection
-            raise RuntimeError("RTSP stream closed unexpectedly")
+            # Stream ended cleanly — return normally so _run() resets retry counter
+            self.on_log("🔄 Stream RTSP đã ngắt. Đang kết nối lại...")
         except Exception as e:
             # Collect FFmpeg stderr if available
             if self._proc and self._proc.stderr:

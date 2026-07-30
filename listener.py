@@ -37,9 +37,12 @@ def _find_ffmpeg() -> str:
 
     return "ffmpeg"  # fallback — sẽ báo lỗi rõ ràng nếu thực sự không có
 
-CHUNK = 2048
+CHUNK = 1024
 SAMPLE_RATE = 16000
 CHANNELS = 1
+BYTES_PER_SAMPLE = 2
+CHUNK_BYTES = CHUNK * BYTES_PER_SAMPLE
+PREBUFFER_CHUNKS = 6
 
 
 class AudioListener:
@@ -124,6 +127,10 @@ class AudioListener:
             _find_ffmpeg(),
             "-loglevel", "error",
             "-rtsp_transport", "tcp",
+            "-rtsp_flags", "prefer_tcp",
+            "-fflags", "+discardcorrupt",
+            "-max_delay", "500000",
+            "-buffer_size", "1048576",
             "-i", self.rtsp_url,
             "-vn",
             "-acodec", "pcm_s16le",
@@ -144,6 +151,7 @@ class AudioListener:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                bufsize=CHUNK_BYTES * 32,
                 **kwargs,
             )
 
@@ -153,21 +161,40 @@ class AudioListener:
                 rate=SAMPLE_RATE,
                 output=True,
                 frames_per_buffer=CHUNK,
+                start=False,
             )
 
             self._notify_status("connected")
             self._notify_log("✅ Đã kết nối camera. Đang phát âm thanh...")
 
-            while self.running:
-                data = self.process.stdout.read(CHUNK * 2)
+            # Prebuffer a few chunks to absorb short network jitter.
+            prebuffer = bytearray()
+            target_prebuffer = CHUNK_BYTES * PREBUFFER_CHUNKS
+            while self.running and len(prebuffer) < target_prebuffer:
+                data = self.process.stdout.read(CHUNK_BYTES)
                 if not data:
-                    # Stream ended, will trigger reconnection
                     raise RuntimeError("RTSP stream closed unexpectedly")
-                stream.write(data)
-                if self.on_volume:
-                    arr = np.frombuffer(data, dtype=np.int16)
-                    vol = int(np.abs(arr).mean() / 327)  # → 0-100
-                    self.on_volume(min(vol, 100))
+                prebuffer.extend(data)
+
+            stream.start_stream()
+            pending = bytes(prebuffer)
+
+            while self.running:
+                if len(pending) < CHUNK_BYTES:
+                    data = self.process.stdout.read(CHUNK_BYTES * 4)
+                    if not data:
+                        # Stream ended, will trigger reconnection
+                        raise RuntimeError("RTSP stream closed unexpectedly")
+                    pending += data
+
+                while len(pending) >= CHUNK_BYTES and self.running:
+                    frame = pending[:CHUNK_BYTES]
+                    pending = pending[CHUNK_BYTES:]
+                    stream.write(frame, exception_on_underflow=False)
+                    if self.on_volume:
+                        arr = np.frombuffer(frame, dtype=np.int16)
+                        vol = int(np.abs(arr).mean() / 327)  # -> 0-100
+                        self.on_volume(min(vol, 100))
 
         except FileNotFoundError:
             self._notify_log(

@@ -1,0 +1,36 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and runtime files
+*.log
+*.tmp
+*.temp
+
+
+# Local state / output
+state/
+*.json
+*.pkl
+*.pickle
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
